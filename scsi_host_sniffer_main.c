@@ -94,6 +94,8 @@ static void process_cmnd_track_done(struct cmnd_track *track, s64 end_time)
 		} else {
 			memset(data.data, 0, sizeof(data.data));
 		}
+
+		relay_write(relay_chan, &data, sizeof(data));
 	}
 
 	kfree(track);
