@@ -252,6 +252,7 @@ static int __init disk_sniffer_init(void)
 
 static void __exit disk_sniffer_exit(void)
 {
+#if 0
 	unsigned long flags;
 	struct Scsi_Host *scsi_host;
 	struct scsi_host_template *host_template;
@@ -284,6 +285,12 @@ static void __exit disk_sniffer_exit(void)
 
 	relay_flush(relay_chan);
 	relay_close(relay_chan);
+#else
+	// For now we can't remove the module
+	printk(KERN_ERR "scsi_host_sniffer module cannot be removed");
+	while (1)
+		msleep(HZ);
+#endif
 }
 
 module_init(disk_sniffer_init);
