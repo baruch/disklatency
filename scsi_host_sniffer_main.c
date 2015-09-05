@@ -199,7 +199,6 @@ static int attach_host(int hostnum)
 
 	scsi_host = scsi_host_lookup(hostnum);
 	if (!scsi_host) {
-		printk(KERN_ERR "scsi_host_sniffer: failed to locate host %d\n", hostnum);
 		return -ENODEV;
 	}
 
@@ -214,6 +213,14 @@ static int attach_host(int hostnum)
 	return 0;
 }
 
+static void attach_all_hosts(void)
+{
+	int hostnum;
+	for (hostnum = 0; hostnum < 16; hostnum++) {
+		attach_host(hostnum);
+	}
+}
+
 static int __init disk_sniffer_init(void)
 {
 	relay_chan = relay_open("scsi_host_sniffer", NULL, 1024*1024, 10, &relay_callbacks, NULL);
@@ -224,7 +231,16 @@ static int __init disk_sniffer_init(void)
 
 	INIT_LIST_HEAD(&track_list);
 
-	attach_host(hostnum);
+	if (hostnum >= 0) {
+		int ret = attach_host(hostnum);
+		if (!ret) {
+			printk(KERN_ERR "scsi_host_sniffer: failed to locate host %d\n", hostnum);
+			relay_close(relay_chan);
+			return -ENODEV;
+		}
+	} else
+		attach_all_hosts();
+
 	return 0;
 }
 
