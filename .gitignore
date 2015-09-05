@@ -1,0 +1,8 @@
+*.mod.*
+*.o
+*.ko
+*.cmd
+scsi_host_sniff
+Module.symvers
+modules.order
+.tmp_versions
