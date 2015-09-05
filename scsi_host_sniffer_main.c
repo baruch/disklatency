@@ -86,7 +86,6 @@ static void sniffer_scsi_done(struct scsi_cmnd *cmnd)
 
 	end_time = get_current_time();
 
-	printk(KERN_INFO "done cmd %p", cmnd);
 	spin_lock_irqsave(&track_lock, flags);
 	track = cmnd_track_from_cmnd(cmnd);
 	list_del(&track->list);
@@ -106,14 +105,12 @@ static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cm
 	if (!track)
 		return old_scsi_queuecommand(scsi_host, cmnd);
 
-	printk(KERN_INFO "track cmd %p track %p", cmnd, track);
 	track->start_time = get_current_time();
 	track->cmnd = cmnd;
 	track->scsi_done = cmnd->scsi_done;
 	cmnd->scsi_done = sniffer_scsi_done;
 
 	spin_lock_irqsave(&track_lock, flags);
-	printk(KERN_INFO "list head %p item %p", &track_list, &track->list);
 	list_add_tail(&track->list, &track_list);
 	spin_unlock_irqrestore(&track_lock, flags);
 
