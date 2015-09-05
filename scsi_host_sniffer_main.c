@@ -32,20 +32,28 @@
 #include <scsi/scsi_dbg.h>
 
 #include <linux/time.h>
+#include <linux/jiffies.h>
+
+#include "sniffer_data.h"
 
 // TODO: take refcount of module we attach to to prevent incorrect order of module removals
 
 static struct scsi_host_template *old_scsi_host_template;
 static int (*old_scsi_queuecommand)(struct Scsi_Host *scsi_host, struct scsi_cmnd *cmnd);
 static struct rchan *relay_chan;
+static unsigned last_cmd_id;
 
 static int hostnum = -1;
 module_param(hostnum, int, 0644);
+
+static int sniffer_enabled = 0;
+module_param(sniffer_enabled, int, 0644);
 
 struct cmnd_track {
 	struct list_head list;
 	struct scsi_cmnd *cmnd;
 	void (*scsi_done)(struct scsi_cmnd *);
+	unsigned id;
 	s64 start_time;
 };
 
@@ -73,7 +81,21 @@ static struct cmnd_track *cmnd_track_from_cmnd(struct scsi_cmnd *cmnd)
 
 static void process_cmnd_track_done(struct cmnd_track *track, s64 end_time)
 {
-	// TODO: Do something useful here
+	if (sniffer_enabled) {
+		struct sniffer_data data;
+
+		data.ts = end_time;
+		data.id = track->id;
+		data.type = SNIFFER_DATA_TYPE_RESPONSE;
+		data.queue_time_usec = 0;
+
+		if (track->cmnd->sense_buffer) {
+			memcpy(data.data, track->cmnd->sense_buffer, sizeof(data.data)); // TODO: Find how to know sense buffer size
+		} else {
+			memset(data.data, 0, sizeof(data.data));
+		}
+	}
+
 	kfree(track);
 }
 
@@ -100,21 +122,41 @@ static void sniffer_scsi_done(struct scsi_cmnd *cmnd)
 static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cmnd *cmnd)
 {
 	unsigned long flags;
+	int ret;
+
 	// TODO: Need to check if we really need GFP_ATOMIC here
 	struct cmnd_track *track = kzalloc(sizeof(*track), GFP_ATOMIC);
 	if (!track)
 		return old_scsi_queuecommand(scsi_host, cmnd);
 
-	track->start_time = get_current_time();
 	track->cmnd = cmnd;
 	track->scsi_done = cmnd->scsi_done;
 	cmnd->scsi_done = sniffer_scsi_done;
 
 	spin_lock_irqsave(&track_lock, flags);
+	track->id = last_cmd_id++;
 	list_add_tail(&track->list, &track_list);
 	spin_unlock_irqrestore(&track_lock, flags);
 
-	return old_scsi_queuecommand(scsi_host, cmnd);
+	track->start_time = get_current_time();
+	ret = old_scsi_queuecommand(scsi_host, cmnd);
+
+	if (sniffer_enabled) {
+		struct sniffer_data data;
+		data.ts = track->start_time;
+		data.queue_time_usec = jiffies_to_usecs(jiffies - track->cmnd->jiffies_at_alloc);
+		data.id = track->id;
+		data.id = SNIFFER_DATA_TYPE_SUBMIT;
+		if (track->cmnd->cmd_len < 16) {
+			memcpy(data.data, track->cmnd->cmnd, track->cmnd->cmd_len);
+			memset(data.data + track->cmnd->cmd_len, 0, 16 - track->cmnd->cmd_len);
+		} else {
+			memcpy(data.data, track->cmnd->cmnd, 16);
+		}
+		relay_write(relay_chan, &data, sizeof(data));
+	}
+
+	return ret;
 }
 
 /*
