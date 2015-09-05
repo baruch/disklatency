@@ -192,7 +192,7 @@ static struct rchan_callbacks relay_callbacks =
 };
 
 
-static int __init disk_sniffer_init(void)
+static int attach_host(int hostnum)
 {
 	struct Scsi_Host *scsi_host;
 	struct scsi_host_template *host_template;
@@ -203,6 +203,19 @@ static int __init disk_sniffer_init(void)
 		return -ENODEV;
 	}
 
+	host_template = scsi_host->hostt;
+	old_scsi_host_template = host_template;
+	old_scsi_queuecommand = host_template->queuecommand;
+	smp_mb();
+
+	host_template->queuecommand = sniffer_scsi_queuecommand;
+	printk(KERN_INFO "scsi_host_sniffer: installed for hostnum %d\n", hostnum);
+
+	return 0;
+}
+
+static int __init disk_sniffer_init(void)
+{
 	relay_chan = relay_open("scsi_host_sniffer", NULL, 1024*1024, 10, &relay_callbacks, NULL);
 	if (!relay_chan) {
 		printk(KERN_ERR "scsi_host_sniffer: failed to create relay channel\n");
@@ -211,13 +224,7 @@ static int __init disk_sniffer_init(void)
 
 	INIT_LIST_HEAD(&track_list);
 
-	host_template = scsi_host->hostt;
-	old_scsi_host_template = host_template;
-	old_scsi_queuecommand = host_template->queuecommand;
-	smp_mb();
-
-	host_template->queuecommand = sniffer_scsi_queuecommand;
-	printk(KERN_INFO "scsi_host_sniffer: installed for hostnum %d\n", hostnum);
+	attach_host(hostnum);
 	return 0;
 }
 
