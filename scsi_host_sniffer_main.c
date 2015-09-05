@@ -204,6 +204,10 @@ static int attach_host(int hostnum)
 
 	host_template = scsi_host->hostt;
 	old_scsi_host_template = host_template;
+
+	if (old_scsi_host_template->queuecommand == sniffer_scsi_queuecommand)
+		return 0;
+
 	old_scsi_queuecommand = host_template->queuecommand;
 	smp_mb();
 
