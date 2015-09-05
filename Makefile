@@ -7,7 +7,12 @@ else
 # normal makefile
 KDIR ?= /lib/modules/`uname -r`/build
 
-default:
+all: module scsi_host_sniff
+
+scsi_host_sniff: scsi_host_sniff.c sniffer_data.h
+	$(CC) -o $@ $< -Wall -Wextra -O3
+
+module:
 	$(MAKE) -C $(KDIR) M=$$PWD
 
 clean:
