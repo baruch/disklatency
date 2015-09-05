@@ -223,6 +223,7 @@ static int __init disk_sniffer_init(void)
 
 static void __exit disk_sniffer_exit(void)
 {
+	unsigned long flags;
 	struct Scsi_Host *scsi_host;
 	struct scsi_host_template *host_template;
 
@@ -232,18 +233,25 @@ static void __exit disk_sniffer_exit(void)
 		return;
 	}
 
+	sniffer_enabled = 0;
 	host_template = scsi_host->hostt;
 
 	if (host_template->queuecommand == sniffer_scsi_queuecommand) {
 		host_template->queuecommand = old_scsi_queuecommand;
+		smp_mb();
 		printk(KERN_INFO "scsi_host_sniffer: hook removed\n");
 	} else {
 		printk(KERN_ERR "scsi_host_sniffer: unknown queuecommand function found, not doing anything\n");
 	}
 
 	/* make sure that all hooks exit prior to removal of the module */
-	while (!list_empty(&track_list))
+	spin_lock_irqsave(&track_lock, flags);
+	while (!list_empty(&track_list)) {
+		spin_unlock_irqrestore(&track_lock, flags);
 		msleep(HZ/10);
+		spin_lock_irqsave(&track_lock, flags);
+	}
+	spin_unlock_irqrestore(&track_lock, flags);
 
 	relay_flush(relay_chan);
 	relay_close(relay_chan);
