@@ -148,7 +148,7 @@ static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cm
 		data.ts = track->start_time;
 		data.queue_time_usec = jiffies_to_usecs(jiffies - track->cmnd->jiffies_at_alloc);
 		data.id = track->id;
-		data.id = SNIFFER_DATA_TYPE_SUBMIT;
+		data.type = SNIFFER_DATA_TYPE_SUBMIT;
 		if (track->cmnd->cmd_len < 16) {
 			memcpy(data.data, track->cmnd->cmnd, track->cmnd->cmd_len);
 			memset(data.data + track->cmnd->cmd_len, 0, 16 - track->cmnd->cmd_len);
