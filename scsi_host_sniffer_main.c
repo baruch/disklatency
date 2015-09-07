@@ -38,8 +38,6 @@
 
 // TODO: take refcount of module we attach to to prevent incorrect order of module removals
 
-static struct scsi_host_template *old_scsi_host_template;
-static int (*old_scsi_queuecommand)(struct Scsi_Host *scsi_host, struct scsi_cmnd *cmnd);
 static struct rchan *relay_chan;
 static unsigned last_cmd_id;
 
@@ -57,8 +55,19 @@ struct cmnd_track {
 	s64 start_time;
 };
 
+#define NUM_HOSTS 4
+typedef int (*queuecommand_cb_t)(struct Scsi_Host *scsi_host, struct scsi_cmnd *cmnd);
+struct host_info {
+	struct Scsi_Host *scsi_host;
+	struct scsi_host_template *scsi_host_template;
+	int host_num;
+
+	queuecommand_cb_t queuecommand;
+};
+
 static DEFINE_SPINLOCK(track_lock);
 static LIST_HEAD(track_list);
+static struct host_info host_infos[NUM_HOSTS];
 
 static s64 get_current_time(void)
 {
@@ -121,7 +130,7 @@ static void sniffer_scsi_done(struct scsi_cmnd *cmnd)
 		scsi_done(cmnd);
 }
 
-static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cmnd *cmnd)
+static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cmnd *cmnd, int host_idx)
 {
 	unsigned long flags;
 	int ret;
@@ -129,7 +138,7 @@ static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cm
 	// TODO: Need to check if we really need GFP_ATOMIC here
 	struct cmnd_track *track = kzalloc(sizeof(*track), GFP_ATOMIC);
 	if (!track)
-		return old_scsi_queuecommand(scsi_host, cmnd);
+		return host_infos[host_idx].queuecommand(scsi_host, cmnd);
 
 	track->cmnd = cmnd;
 	track->scsi_done = cmnd->scsi_done;
@@ -141,7 +150,7 @@ static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cm
 	spin_unlock_irqrestore(&track_lock, flags);
 
 	track->start_time = get_current_time();
-	ret = old_scsi_queuecommand(scsi_host, cmnd);
+	ret = host_infos[host_idx].queuecommand(scsi_host, cmnd);
 
 	if (sniffer_enabled) {
 		struct sniffer_data data;
@@ -193,29 +202,86 @@ static struct rchan_callbacks relay_callbacks =
         .remove_buf_file = remove_buf_file_handler,
 };
 
+static struct host_info *find_scsi_host(struct Scsi_Host *host)
+{
+	struct host_info *info;
+	int i;
+
+	for (i = 0; i < NUM_HOSTS; i++) {
+		info = &host_infos[i];
+		if (info->scsi_host == host)
+			return info;
+	}
+
+	return NULL;
+}
+
+#define QUEUECOMMAND_LIST() \
+	QUEUECOMMAND(0) \
+	QUEUECOMMAND(1) \
+	QUEUECOMMAND(2) \
+	QUEUECOMMAND(3)
+
+
+#define QUEUECOMMAND(idx) \
+	static int host_queuecmd_##idx(struct Scsi_Host *scsi_host, struct scsi_cmnd *cmnd) \
+	{ \
+		static int logged; if (unlikely(!logged)) { printk(KERN_INFO "first logged cmd on host %d\n", idx); logged = 1; } \
+		return sniffer_scsi_queuecommand(scsi_host, cmnd, idx); \
+	}
+QUEUECOMMAND_LIST()
+#undef QUEUECOMMAND
+
+static queuecommand_cb_t assign_host_info(struct Scsi_Host *host, struct host_info **host_info_ptr)
+{
+	struct host_info *info;
+	int i;
+
+	for (i = 0; i < NUM_HOSTS; i++) {
+		info = &host_infos[i];
+		if (info->scsi_host == NULL) {
+			info->scsi_host = host;
+			info->scsi_host_template = host->hostt;
+			info->queuecommand = host->hostt->queuecommand;
+			*host_info_ptr = info;
+			smp_mb();
+
+#define QUEUECOMMAND(idx) case idx: return host_queuecmd_##idx;
+			switch (i) {
+				QUEUECOMMAND_LIST()
+			}
+#undef QUEUECOMMAND
+			return NULL;
+		}
+	}
+
+	return NULL;
+}
 
 static int attach_host(int hostnum)
 {
 	struct Scsi_Host *scsi_host;
-	struct scsi_host_template *host_template;
+	struct host_info *host_info;
+	queuecommand_cb_t queuecommand;
 
 	scsi_host = scsi_host_lookup(hostnum);
 	if (!scsi_host) {
 		return -ENODEV;
 	}
 
-	host_template = scsi_host->hostt;
-	old_scsi_host_template = host_template;
+	host_info = find_scsi_host(scsi_host);
+	if (host_info)
+		return -ENODEV;
 
-	if (old_scsi_host_template->queuecommand == sniffer_scsi_queuecommand)
-		return 0;
+	queuecommand = assign_host_info(scsi_host, &host_info);
+	if (!host_info->queuecommand) {
+		printk(KERN_ERR "scsi_host_sniffer: failed to install sniffer on host %d\n", hostnum);
+		return -ENOSPC;
+	}
 
-	old_scsi_queuecommand = host_template->queuecommand;
-	smp_mb();
-
-	host_template->queuecommand = sniffer_scsi_queuecommand;
+	host_info->host_num = hostnum;
+	scsi_host->hostt->queuecommand = queuecommand;
 	printk(KERN_INFO "scsi_host_sniffer: installed for hostnum %d\n", hostnum);
-
 	return 0;
 }
 
@@ -226,6 +292,52 @@ static void attach_all_hosts(void)
 		attach_host(hostnum);
 	}
 }
+
+#if 0
+static struct host_info *find_host_info_by_num(int hostnum)
+{
+	int i;
+
+	for (i = 0; i < NUM_HOSTS; i++) {
+		if (host_infos[i].scsi_host && host_infos[i].host_num == hostnum)
+			return &host_infos[i];
+	}
+
+	return NULL;
+}
+
+static void detach_host(int hostnum)
+{
+	struct Scsi_Host *scsi_host;
+	struct host_info *host_info;
+
+	scsi_host = scsi_host_lookup(hostnum);
+	if (!scsi_host) {
+		//printk(KERN_ERR "scsi_host_sniffer: failed to locate host %d\n", hostnum);
+		return;
+	}
+
+	host_info = find_host_info_by_num(hostnum);
+	if (scsi_host != host_info->scsi_host) {
+		printk(KERN_ERR "The scsi host ptr for host %d has a mismatch with current scsi host", hostnum);
+		return;
+	}
+
+	scsi_host->hostt->queuecommand = host_info->queuecommand;
+	smp_mb();
+	host_info->scsi_host = NULL;
+	printk(KERN_INFO "scsi_host_sniffer: hook removed for host %d\n", hostnum);
+}
+
+static void detach_all_hosts(void)
+{
+	int hostnum;
+
+	for (hostnum = 0; hostnum < NUM_HOSTS; hostnum++) {
+		detach_host(hostnum);
+	}
+}
+#endif
 
 static int __init disk_sniffer_init(void)
 {
@@ -254,31 +366,17 @@ static void __exit disk_sniffer_exit(void)
 {
 #if 0
 	unsigned long flags;
-	struct Scsi_Host *scsi_host;
-	struct scsi_host_template *host_template;
-
-	scsi_host = scsi_host_lookup(hostnum);
-	if (!scsi_host) {
-		printk(KERN_ERR "scsi_host_sniffer: failed to locate host %d\n", hostnum);
-		return;
-	}
 
 	sniffer_enabled = 0;
-	host_template = scsi_host->hostt;
+	detach_all_hosts();
 
-	if (host_template->queuecommand == sniffer_scsi_queuecommand) {
-		host_template->queuecommand = old_scsi_queuecommand;
-		smp_mb();
-		printk(KERN_INFO "scsi_host_sniffer: hook removed\n");
-	} else {
-		printk(KERN_ERR "scsi_host_sniffer: unknown queuecommand function found, not doing anything\n");
-	}
+	msleep(100);
 
 	/* make sure that all hooks exit prior to removal of the module */
 	spin_lock_irqsave(&track_lock, flags);
 	while (!list_empty(&track_list)) {
 		spin_unlock_irqrestore(&track_lock, flags);
-		msleep(HZ/10);
+		msleep(100);
 		spin_lock_irqsave(&track_lock, flags);
 	}
 	spin_unlock_irqrestore(&track_lock, flags);
@@ -289,7 +387,7 @@ static void __exit disk_sniffer_exit(void)
 	// For now we can't remove the module
 	printk(KERN_ERR "scsi_host_sniffer module cannot be removed");
 	while (1)
-		msleep(HZ);
+		msleep(100);
 #endif
 }
 
