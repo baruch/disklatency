@@ -36,8 +36,6 @@
 
 #include "sniffer_data.h"
 
-// TODO: take refcount of module we attach to to prevent incorrect order of module removals
-
 static struct rchan *relay_chan;
 static unsigned last_cmd_id;
 
