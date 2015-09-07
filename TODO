@@ -1,10 +1,11 @@
-- log all commands as they come and go
++ log all commands as they come and go
+- Report device in the logged IOs
 - Create a rolling snapshot of IO latencies
 - Provide a method to pull the IO latencies snapshot (for debugging based on an external event)
 - Send the snapshot upon an event
   - sense key is an error
   - latency above a threshold
-- Attach to all SCSI hosts
++ Attach to all SCSI hosts
 - Rescan SCSI hosts (preferably on creation)
 - Handle SCSI host deletion properly
 - Find IO abnormalities with IOs that never completed (host disppeared? we never were notified of completion?)
