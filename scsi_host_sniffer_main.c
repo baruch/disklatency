@@ -21,6 +21,7 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/delay.h>
+#include <linux/atomic.h>
 
 #include <linux/relay.h>
 #include <linux/debugfs.h>
@@ -35,6 +36,8 @@
 #include <linux/jiffies.h>
 
 #include "sniffer_data.h"
+
+#define NUM_CMDS_IN_SNAPSHOT (1500000) // 50 devices with 30,000 IOs for each device
 
 static struct rchan *relay_chan;
 static unsigned last_cmd_id;
@@ -52,6 +55,15 @@ struct cmnd_track {
 	unsigned int host, ctl, target, lun;
 	unsigned id;
 	s64 start_time;
+	unsigned char cdb[16];
+};
+
+struct cmnd_log {
+	unsigned int host, ctl, target, lun;
+	unsigned id;
+	s64 start_time, end_time;
+	unsigned char cdb[16];
+	unsigned char sense[16];
 };
 
 #define NUM_HOSTS 4
@@ -67,6 +79,8 @@ struct host_info {
 static DEFINE_SPINLOCK(track_lock);
 static LIST_HEAD(track_list);
 static struct host_info host_infos[NUM_HOSTS];
+static struct cmnd_log log[NUM_CMDS_IN_SNAPSHOT];
+static atomic_t log_next_idx = ATOMIC_INIT(0);
 
 static s64 get_current_time(void)
 {
@@ -89,6 +103,31 @@ static struct cmnd_track *cmnd_track_from_cmnd(struct scsi_cmnd *cmnd)
 
 static void process_cmnd_track_done(struct cmnd_track *track, s64 end_time)
 {
+	int idx, val;
+	struct cmnd_log *l;
+
+	// Get an idx to put our tracked data into and wrap the next index around if needed
+	do {
+		idx = atomic_read(&log_next_idx);
+		val = idx + 1;
+		if (unlikely(val == NUM_CMDS_IN_SNAPSHOT))
+			val = 0;
+	} while (atomic_cmpxchg(&log_next_idx, idx, val) != idx);
+
+	l = &log[idx];
+	l->host = track->host;
+	l->ctl = track->ctl;
+	l->target = track->target;
+	l->lun = track->lun;
+	l->id = track->id;
+	l->start_time = track->start_time;
+	l->end_time = end_time;
+	memcpy(l->cdb, track->cdb, 16);
+	if (track->cmnd->sense_buffer)
+		memcpy(l->sense, track->cmnd->sense_buffer, 16);
+	else
+		memset(l->sense, 0, 16);
+
 	if (sniffer_enabled) {
 		struct sniffer_data data;
 
@@ -148,6 +187,12 @@ static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cm
 	track->ctl = cmnd->device->channel;
 	track->target = cmnd->device->id;
 	track->lun = cmnd->device->lun;
+	if (track->cmnd->cmd_len < 16) {
+		memcpy(track->cdb, track->cmnd->cmnd, track->cmnd->cmd_len);
+		memset(track->cdb + track->cmnd->cmd_len, 0, 16 - track->cmnd->cmd_len);
+	} else {
+		memcpy(track->cdb, track->cmnd->cmnd, 16);
+	}
 
 	track->scsi_done = cmnd->scsi_done;
 	cmnd->scsi_done = sniffer_scsi_done;
@@ -170,12 +215,7 @@ static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cm
 		data.lun = track->lun;
 		data.id = track->id;
 		data.type = SNIFFER_DATA_TYPE_SUBMIT;
-		if (track->cmnd->cmd_len < 16) {
-			memcpy(data.data, track->cmnd->cmnd, track->cmnd->cmd_len);
-			memset(data.data + track->cmnd->cmd_len, 0, 16 - track->cmnd->cmd_len);
-		} else {
-			memcpy(data.data, track->cmnd->cmnd, 16);
-		}
+		memcpy(data.data, track->cdb, 16);
 		relay_write(relay_chan, &data, sizeof(data));
 	}
 
