@@ -51,6 +51,7 @@ struct cmnd_track {
 	struct list_head list;
 	struct scsi_cmnd *cmnd;
 	void (*scsi_done)(struct scsi_cmnd *);
+	unsigned int host, ctl, target, lun;
 	unsigned id;
 	s64 start_time;
 };
@@ -94,6 +95,10 @@ static void process_cmnd_track_done(struct cmnd_track *track, s64 end_time)
 		struct sniffer_data data;
 
 		data.ts = end_time;
+		data.host = track->host;
+		data.ctl = track->ctl;
+		data.target = track->target;
+		data.lun = track->lun;
 		data.id = track->id;
 		data.type = SNIFFER_DATA_TYPE_RESPONSE;
 		data.queue_time_usec = 0;
@@ -141,6 +146,11 @@ static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cm
 		return host_infos[host_idx].queuecommand(scsi_host, cmnd);
 
 	track->cmnd = cmnd;
+	track->host = cmnd->device->host->host_no;
+	track->ctl = cmnd->device->channel;
+	track->target = cmnd->device->id;
+	track->lun = cmnd->device->lun;
+
 	track->scsi_done = cmnd->scsi_done;
 	cmnd->scsi_done = sniffer_scsi_done;
 
@@ -156,6 +166,10 @@ static int sniffer_scsi_queuecommand(struct Scsi_Host *scsi_host, struct scsi_cm
 		struct sniffer_data data;
 		data.ts = track->start_time;
 		data.queue_time_usec = jiffies_to_usecs(jiffies - track->cmnd->jiffies_at_alloc);
+		data.host = track->host;
+		data.ctl = track->ctl;
+		data.target = track->target;
+		data.lun = track->lun;
 		data.id = track->id;
 		data.type = SNIFFER_DATA_TYPE_SUBMIT;
 		if (track->cmnd->cmd_len < 16) {

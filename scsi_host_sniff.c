@@ -22,7 +22,7 @@ static int usage(char *name)
 
 static void print_sniff_data(struct sniffer_data *sniff)
 {
-	printf("%ld %lu %u %u %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n", sniff->ts, sniff->queue_time_usec, sniff->id, sniff->type, sniff->data[0], sniff->data[1], sniff->data[2], sniff->data[3], sniff->data[4], sniff->data[5], sniff->data[6], sniff->data[7], sniff->data[8], sniff->data[9]);
+	printf("%ld %lu %u:%u:%u:%u %u %u %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n", sniff->ts, sniff->queue_time_usec, sniff->host, sniff->ctl, sniff->target, sniff->lun, sniff->id, sniff->type, sniff->data[0], sniff->data[1], sniff->data[2], sniff->data[3], sniff->data[4], sniff->data[5], sniff->data[6], sniff->data[7], sniff->data[8], sniff->data[9]);
 }
 
 static void process_buffer(char *buf, ssize_t len)

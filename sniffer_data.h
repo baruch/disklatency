@@ -4,6 +4,10 @@
 struct sniffer_data {
 	int64_t ts;
 	unsigned long queue_time_usec;
+	unsigned int host;
+	unsigned int ctl;
+	unsigned int target;
+	unsigned int lun;
 	unsigned id;
 	uint8_t type; // 0=Request, 1=Response (future would be abort task, target reset)
 	unsigned char data[16]; // CDB or Sense

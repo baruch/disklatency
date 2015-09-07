@@ -1,5 +1,5 @@
 + log all commands as they come and go
-- Report device in the logged IOs
++ Report device in the logged IOs
 - Create a rolling snapshot of IO latencies
 - Provide a method to pull the IO latencies snapshot (for debugging based on an external event)
 - Send the snapshot upon an event
