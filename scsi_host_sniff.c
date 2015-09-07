@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <signal.h>
 
 #include "sniffer_data.h"
 
@@ -60,11 +61,18 @@ static void process_data(char *filename)
 	close(fd);
 }
 
+void handle_sigint(int signum)
+{
+	(void)signum; // unused
+	fflush(stdout);
+}
+
 int main(int argc, char **argv)
 {
 	if (argc != 2)
 		return usage(argv[0]);
 
+	signal(SIGINT, handle_sigint);
 	process_data(argv[1]);
 
 	return 0;
