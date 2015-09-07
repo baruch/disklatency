@@ -293,52 +293,6 @@ static void attach_all_hosts(void)
 	}
 }
 
-#if 0
-static struct host_info *find_host_info_by_num(int hostnum)
-{
-	int i;
-
-	for (i = 0; i < NUM_HOSTS; i++) {
-		if (host_infos[i].scsi_host && host_infos[i].host_num == hostnum)
-			return &host_infos[i];
-	}
-
-	return NULL;
-}
-
-static void detach_host(int hostnum)
-{
-	struct Scsi_Host *scsi_host;
-	struct host_info *host_info;
-
-	scsi_host = scsi_host_lookup(hostnum);
-	if (!scsi_host) {
-		//printk(KERN_ERR "scsi_host_sniffer: failed to locate host %d\n", hostnum);
-		return;
-	}
-
-	host_info = find_host_info_by_num(hostnum);
-	if (scsi_host != host_info->scsi_host) {
-		printk(KERN_ERR "The scsi host ptr for host %d has a mismatch with current scsi host", hostnum);
-		return;
-	}
-
-	scsi_host->hostt->queuecommand = host_info->queuecommand;
-	smp_mb();
-	host_info->scsi_host = NULL;
-	printk(KERN_INFO "scsi_host_sniffer: hook removed for host %d\n", hostnum);
-}
-
-static void detach_all_hosts(void)
-{
-	int hostnum;
-
-	for (hostnum = 0; hostnum < NUM_HOSTS; hostnum++) {
-		detach_host(hostnum);
-	}
-}
-#endif
-
 static int __init disk_sniffer_init(void)
 {
 	relay_chan = relay_open("scsi_host_sniffer", NULL, 1024*1024, 10, &relay_callbacks, NULL);
@@ -356,39 +310,18 @@ static int __init disk_sniffer_init(void)
 			relay_close(relay_chan);
 			return -ENODEV;
 		}
-	} else
+	} else {
 		attach_all_hosts();
+	}
+
+	__module_get(THIS_MODULE);
 
 	return 0;
 }
 
 static void __exit disk_sniffer_exit(void)
 {
-#if 0
-	unsigned long flags;
-
-	sniffer_enabled = 0;
-	detach_all_hosts();
-
-	msleep(100);
-
-	/* make sure that all hooks exit prior to removal of the module */
-	spin_lock_irqsave(&track_lock, flags);
-	while (!list_empty(&track_list)) {
-		spin_unlock_irqrestore(&track_lock, flags);
-		msleep(100);
-		spin_lock_irqsave(&track_lock, flags);
-	}
-	spin_unlock_irqrestore(&track_lock, flags);
-
-	relay_flush(relay_chan);
-	relay_close(relay_chan);
-#else
-	// For now we can't remove the module
-	printk(KERN_ERR "scsi_host_sniffer module cannot be removed");
-	while (1)
-		msleep(100);
-#endif
+	BUG();
 }
 
 module_init(disk_sniffer_init);

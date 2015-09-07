@@ -7,7 +7,7 @@
   - latency above a threshold
 + Attach to all SCSI hosts
 - Rescan SCSI hosts (preferably on creation)
-- Handle SCSI host deletion properly
+c Handle SCSI host deletion properly
 - Find IO abnormalities with IOs that never completed (host disppeared? we never were notified of completion?)
 - Create histogram of IO latencies periodically per device
 - Make it all lockless to reduce impact on system performance and per-IO overhead
