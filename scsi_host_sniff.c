@@ -11,6 +11,8 @@
 
 #define BUF_SIZE (16*1024)
 
+static int requested_exit;
+
 static int usage(char *name)
 {
 	fprintf(stderr, "Usage:\n"
@@ -46,7 +48,7 @@ static void process_data(char *filename)
 		return;
 	}
 
-	while (1) {
+	while (!requested_exit) {
 		ssize_t read_bytes = read(fd, buf, (BUF_SIZE / sizeof(struct sniffer_data)) * sizeof(struct sniffer_data));
 		if (read_bytes < 0) {
 			if (errno == EINTR)
@@ -59,12 +61,14 @@ static void process_data(char *filename)
 	}
 
 	close(fd);
+
+	fflush(stdout);
 }
 
 void handle_sigint(int signum)
 {
 	(void)signum; // unused
-	fflush(stdout);
+	requested_exit = 1;
 }
 
 int main(int argc, char **argv)
